@@ -266,7 +266,7 @@ export default function App() {
   useEffect(() => {
     if (screen !== 'lobby') return;
     loadGames();
-    const interval = setInterval(loadGames, 2000);
+    const interval = setInterval(loadGames, 5000);
     return () => clearInterval(interval);
   }, [screen]);
 
@@ -304,6 +304,7 @@ export default function App() {
   /* ===================== LOBBY ===================== */
 
   const loadGames = async () => {
+    if (document.hidden) return;
     try {
       const result = await window.storage.get('lobby');
       const ids = result?.value ? JSON.parse(result.value) : [];
@@ -386,6 +387,7 @@ export default function App() {
     console.log('POLL SETUP: Starting polling with color:', color);
     
     pollingInterval.current = setInterval(async () => {
+      if (document.hidden) return;
       try {
         const result = await window.storage.get(gameId, true);
         if (!result) {
