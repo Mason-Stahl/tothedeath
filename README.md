@@ -1,6 +1,6 @@
 # This is a online multiplayer prototype for the game, To The Death
 
-### Sumo wrestling meets rock paper scissors. This is the dstillation of every type of martial arts, this is strategy and luck, perfectly balanced. The push and pull, attack defence, the yin yang of life, as a game.  
+### Sumo wrestling meets rock paper scissors. This is the distillation of martial arts, this is strategy and luck, perfectly balanced. The push and pull, attack defence, the yin yang of life, as a game.  
 
 ## To Start:
 
