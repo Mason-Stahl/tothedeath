@@ -187,7 +187,7 @@ const GameBoard = ({ gameState, onMove, onAttack, phase, playerColor, pendingMov
     else if (phase === 'attack' && attackOptions.includes(tileId)) onAttack(tileId);
   };
   
-  const minX = -55, maxX = 280, minY = -80, maxY = 400;
+  const minX = -55, maxX = 280, minY = -45, maxY = 365;
   const viewBox = `${minX} ${minY} ${maxX - minX} ${maxY - minY}`;
   
   return (
@@ -305,19 +305,22 @@ export default function App() {
 
   const loadGames = async () => {
     try {
-      const result = await window.storage.list('game:', true);
-      if (result?.keys) {
-        const gameData = await Promise.all(
-          result.keys.map(async key => {
-            try {
-              const data = await window.storage.get(key, true);
-              return data ? { id: key, ...JSON.parse(data.value) } : null;
-            } catch { return null; }
-          })
-        );
-        setGames(gameData.filter(g => g?.status === 'waiting'));
-      }
+      const result = await window.storage.get('lobby');
+      const ids = result?.value ? JSON.parse(result.value) : [];
+      setGames(ids.map(id => ({ id })));
     } catch { setGames([]); }
+  };
+
+  const addToLobby = async (gameId) => {
+    const result = await window.storage.get('lobby');
+    const ids = result?.value ? JSON.parse(result.value) : [];
+    await window.storage.set('lobby', JSON.stringify([...ids, gameId]));
+  };
+
+  const removeFromLobby = async (gameId) => {
+    const result = await window.storage.get('lobby');
+    const ids = result?.value ? JSON.parse(result.value) : [];
+    await window.storage.set('lobby', JSON.stringify(ids.filter(id => id !== gameId)));
   };
 
   const createGame = async () => {
@@ -346,6 +349,7 @@ export default function App() {
 	  };
 
 	  await window.storage.set(gameId, JSON.stringify(newGame), true);
+    await addToLobby(gameId);
 	  setCurrentGame({ id: gameId, ...newGame });
     lastSeenRoundId.current = 0;
 	  setPlayerColor('black');
@@ -363,6 +367,7 @@ export default function App() {
       game.whitePlayer = true;
       game.status = 'playing';
       await window.storage.set(gameId, JSON.stringify(game), true);
+      await removeFromLobby(gameId);
       setCurrentGame({ id: gameId, ...game });
       lastSeenRoundId.current = 0;
       setPlayerColor('white');
@@ -485,7 +490,7 @@ export default function App() {
           // keep polling alive so rematch can be detected
         }
       } catch (e) { console.error('Poll error', e); }
-    }, 400);
+    }, 1500);
   };
 
   /* ===================== ANIMATION ===================== */
@@ -736,7 +741,10 @@ export default function App() {
   const goToLobby = async () => {
     localStorage.removeItem('ttd_gameId');
     localStorage.removeItem('ttd_color');
-    if (currentGame) await window.storage.delete(currentGame.id, true);
+    if (currentGame) {
+      await removeFromLobby(currentGame.id);
+      await window.storage.delete(currentGame.id, true);
+    }
     if (pollingInterval.current) clearInterval(pollingInterval.current);
     if (animationInterval.current) { clearInterval(animationInterval.current); animationInterval.current = null; }
     setScreen('lobby');
@@ -766,9 +774,11 @@ export default function App() {
       <div className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white p-8">
         <div className="max-w-2xl mx-auto">
           <div className="text-center mb-12">
-            <div className="flex items-center justify-center gap-3 mb-4">
-              <Swords size={48} className="text-red-500" />
+            <div className="flex items-center justify-center mb-4" style={{gap: '0.75rem'}}>
+              
+              <span className="text-red-500" style={{fontSize: '48px', lineHeight: 1}}>☯</span>
               <h1 className="text-6xl font-bold text-red-500">To The Death</h1>
+              <span className="text-red-500" style={{fontSize: '48px', lineHeight: 1}}>☯</span>
             </div>
           </div>
           <div className="bg-gray-800 rounded-lg p-6">
@@ -818,10 +828,15 @@ export default function App() {
   const waiting = currentGame.status === 'waiting';
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white p-4">
+    <div className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white p-2">
       <div className="max-w-4xl mx-auto">
-        <div className="text-center mb-4">
-          <h1 className="text-4xl font-bold text-red-500 mb-2">To The Death</h1>
+        <div style={{position: 'relative', marginBottom: '1rem', textAlign: 'center'}}>
+          <button onClick={goToLobby} style={{position: 'absolute', right: 0, top: 0, paddingTop: '4px', paddingBottom: '4px'}} className="px-3 bg-gray-700 hover:bg-gray-600 rounded text-sm">Lobby</button>
+          <div className="flex items-center justify-center mb-4" style={{gap: '0.75rem'}}>
+            <Swords size={48} className="text-red-500" />
+            <h1 className="text-4xl font-bold text-red-500 mb-1">To The Death</h1>
+            <Swords size={48} className="text-red-500" />
+          </div>
           <div className="flex justify-center gap-8 text-lg" style={{gap: '2rem'}}>
             <div className={playerColor === 'black' ? 'font-bold' : ''}>Black: ❤️ {currentGame.blackLives}</div>
             <div className={playerColor === 'white' ? 'font-bold' : ''}>White: ❤️ {currentGame.whiteLives}</div>
@@ -841,13 +856,13 @@ export default function App() {
         </div>
       ) : (
           <>
-            <div className="bg-gray-800 rounded-lg p-6 mb-4">
-              <GameBoard gameState={currentGame} onMove={handleMove} onAttack={handleAttack} 
-                         phase={phase} playerColor={playerColor} pendingMove={pendingMove} 
+            <div className="bg-gray-800 rounded-lg p-2 mb-2">
+              <GameBoard gameState={currentGame} onMove={handleMove} onAttack={handleAttack}
+                         phase={phase} playerColor={playerColor} pendingMove={pendingMove}
                          pendingAttack={pendingAttack} animation={animation} />
             </div>
-            <div className="bg-gray-800 rounded-lg p-6">
-              <div className="text-center mb-4">
+            <div className="bg-gray-800 rounded-lg p-3">
+              <div className="text-center mb-2">
                 <p className="text-xl">
                   {resolutionMessage || (
                     phase === 'move' ? 'Select tile to move' :
