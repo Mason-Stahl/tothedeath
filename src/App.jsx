@@ -492,7 +492,7 @@ export default function App() {
           // keep polling alive so rematch can be detected
         }
       } catch (e) { console.error('Poll error', e); }
-    }, 1500);
+    }, 2000);
   };
 
   /* ===================== ANIMATION ===================== */
