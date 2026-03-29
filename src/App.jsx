@@ -180,7 +180,7 @@ const GameBoard = ({ gameState, onMove, onAttack, phase, playerColor, pendingMov
   const opponentPos = playerColor === 'black' ? gameState.whitePos : gameState.blackPos;
   
   const moveOptions = phase === 'move' ? [currentPos, ...getAdjacentTiles(currentPos)] : [];
-  const attackOptions = phase === 'attack' && pendingMove ? getAdjacentTiles(pendingMove) : [];
+  const attackOptions = phase === 'attack' && pendingMove !== null ? getAdjacentTiles(pendingMove) : [];
   
   const handleClick = (tileId) => {
     if (phase === 'move' && moveOptions.includes(tileId)) onMove(tileId);
@@ -203,12 +203,12 @@ const GameBoard = ({ gameState, onMove, onAttack, phase, playerColor, pendingMov
       })}
       
       {/* Show pending actions */}
-      {pendingMove && !animation && (
+      {pendingMove !== null && !animation && (
         <MoveArrow fromTile={BOARD_LAYOUT.find(t => t.id === currentPos)} 
                    toTile={BOARD_LAYOUT.find(t => t.id === pendingMove)} 
                    color={playerColor} isPlayerView={playerColor} />
       )}
-      {pendingAttack && phase === 'attack' && !animation && (
+      {pendingAttack !== null && phase === 'attack' && !animation && (
         <AttackX tile={BOARD_LAYOUT.find(t => t.id === pendingAttack)} isPlayerView={playerColor} color={playerColor} />
       )}
       
@@ -243,6 +243,51 @@ const GameBoard = ({ gameState, onMove, onAttack, phase, playerColor, pendingMov
   );
 };
 
+/* ===================== BOT ===================== */
+
+const getBotDecision = (game) => {
+  const botTile = BOARD_LAYOUT.find(t => t.id === game.whitePos);
+  const humanTile = BOARD_LAYOUT.find(t => t.id === game.blackPos);
+  const hx = humanTile.q * 56, hy = humanTile.r * 80;
+
+  const scoreOptions = (fromTile, ids) => {
+    const fx = fromTile.q * 56, fy = fromTile.r * 80;
+    const dx = hx - fx, dy = hy - fy;
+    const tdist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+    return ids.map(id => {
+      const t = BOARD_LAYOUT.find(t => t.id === id);
+      const mx = t.q * 56 - fx, my = t.r * 80 - fy;
+      const mdist = Math.sqrt(mx * mx + my * my) || 0.01;
+      return { id, dot: (mx * dx + my * dy) / (mdist * tdist) };
+    }).sort((a, b) => b.dot - a.dot);
+  };
+
+  // Move: 10% retreat, 90% forward-biased (40/30/30)
+  const moveScores = scoreOptions(botTile, [game.whitePos, ...getAdjacentTiles(game.whitePos)]);
+  let chosenMove;
+  if (Math.random() < 0.10) {
+    chosenMove = moveScores[moveScores.length - 1].id;
+  } else {
+    const pool = moveScores.filter(s => s.dot >= 0);
+    const opts = pool.length > 0 ? pool : moveScores;
+    const r = Math.random();
+    chosenMove = r < 0.4 || opts.length === 1 ? opts[0].id
+               : r < 0.7 || opts.length === 2  ? opts[1].id
+               : opts[Math.min(2, opts.length - 1)].id;
+  }
+
+  // Attack from new position toward human (50/30/20)
+  const moveTile = BOARD_LAYOUT.find(t => t.id === chosenMove);
+  const attackOpts = getAdjacentTiles(chosenMove);
+  const atkScores = scoreOptions(moveTile, attackOpts.length > 0 ? attackOpts : [chosenMove]);
+  const r2 = Math.random();
+  const chosenAttack = r2 < 0.5 || atkScores.length === 1 ? atkScores[0].id
+                     : r2 < 0.8 || atkScores.length === 2  ? atkScores[1].id
+                     : atkScores[Math.min(2, atkScores.length - 1)].id;
+
+  return { move: chosenMove, attack: chosenAttack };
+};
+
 /* ===================== MAIN COMPONENT ===================== */
 
 export default function App() {
@@ -253,6 +298,7 @@ export default function App() {
   const [winner, setWinner] = useState(null);
   
 
+  const [vsBot, setVsBot] = useState(false);
   const [phase, setPhase] = useState('move');
   const [pendingMove, setPendingMove] = useState(null);
   const [pendingAttack, setPendingAttack] = useState(null);
@@ -287,6 +333,7 @@ export default function App() {
         setCurrentGame({ id: savedId, ...game });
         setPlayerColor(savedColor);
         lastSeenRoundId.current = game.roundId;
+        if (game.isBot) setVsBot(true);
 
         if (game.blackLives === 0 || game.whiteLives === 0) {
           setWinner(game.blackLives === 0 ? 'white' : 'black');
@@ -409,8 +456,8 @@ export default function App() {
       const animRound = game.roundId; // ← this is the round being played NOW
       
       if (
-        game.blackMove &&
-        game.whiteMove &&
+        game.blackMove !== null &&
+        game.whiteMove !== null &&
         animatingRoundId.current !== game.roundId
       ) {
         animatingRoundId.current = game.roundId;
@@ -483,6 +530,7 @@ export default function App() {
           setPendingAttack(null);
           setResolutionMessage('');
           setWinner(null);
+          if (game.isBot) setVsBot(true);
           setScreen('game');
         }
         
@@ -689,7 +737,7 @@ export default function App() {
   };
 
   const confirmTurn = async () => {
-    if (!pendingMove || !pendingAttack || phase === 'waiting') return;
+    if (pendingMove === null || pendingAttack === null || phase === 'waiting') return;
 
     console.log('CONFIRM: Starting turn confirmation', {
       playerColor,
@@ -734,6 +782,7 @@ export default function App() {
       console.log('CONFIRM: Saving updated game state');
       await window.storage.set(currentGame.id, JSON.stringify(game), true);
       console.log('CONFIRM: Save complete');
+      if (vsBot) await runBotTurn(currentGame.id, game);
     } catch (e) {
       console.error('Confirm error', e);
       setPhase('attack');
@@ -757,14 +806,37 @@ export default function App() {
     setPendingAttack(null);
     setPhase('move');
     setAnimation(null);
+    setVsBot(false);
     lastSeenRoundId.current = null;
+  };
+
+  const runBotTurn = async (gameId, game) => {
+    const { move, attack } = getBotDecision(game);
+    game.whiteMove = move;
+    game.whiteAttack = attack;
+    game.whiteStartPos = game.whitePos;
+    await window.storage.set(gameId, JSON.stringify(game));
+  };
+
+  const activateBotGame = async () => {
+    const result = await window.storage.get(currentGame.id);
+    const game = JSON.parse(result.value);
+    game.whitePlayer = true;
+    game.status = 'playing';
+    game.isBot = true;
+    await window.storage.set(currentGame.id, JSON.stringify(game));
+    setCurrentGame({ ...currentGame, ...game });
+    setVsBot(true);
   };
 
   const requestRematch = async () => {
     if (!currentGame) return;
     const result = await window.storage.get(currentGame.id, true);
     const game = JSON.parse(result.value);
-    if (playerColor === 'black') game.blackRematch = true;
+    if (vsBot) {
+      game.blackRematch = true;
+      game.whiteRematch = true;
+    } else if (playerColor === 'black') game.blackRematch = true;
     else game.whiteRematch = true;
     await window.storage.set(currentGame.id, JSON.stringify(game), true);
   };
@@ -855,6 +927,12 @@ export default function App() {
               {currentGame.id.replace('game:', '')}
             </span>
           </div>
+
+          <div style={{paddingTop: '50px'}}>
+            <button onClick={activateBotGame} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold text-lg">
+              🤖 Play Bot
+            </button>
+          </div>
         </div>
       ) : (
           <>
@@ -877,7 +955,7 @@ export default function App() {
               <div className="flex" style={{gap: '1.2rem'}}>
                 <button onClick={undoTurn} disabled={phase === 'waiting' || phase === 'animating'} 
                         className="flex-1 py-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-900 disabled:text-gray-600 rounded font-bold">Undo</button>
-                <button onClick={confirmTurn} disabled={!pendingMove || !pendingAttack || phase !== 'attack'} 
+                <button onClick={confirmTurn} disabled={pendingMove === null || pendingAttack === null || phase !== 'attack'} 
                         className="flex-1 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-900 disabled:text-gray-600 rounded font-bold">Confirm</button>
               </div>
             </div>
